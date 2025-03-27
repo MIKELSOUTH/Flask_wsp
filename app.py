@@ -1,47 +1,52 @@
+from flask import Flask, jsonify, request
 import qrcode
 import os
 import time
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
-from flask import Flask, jsonify, request
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 app = Flask(__name__)
 
-# Configuración de SMTP (para Gmail)
-SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
-SMTP_PORT = os.environ.get('SMTP_PORT', 587)
-GMAIL_USER = os.environ.get('EMAIL_USER')  # Tu correo de Gmail (en variable de entorno)
-GMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')  # Tu contraseña de Gmail o contraseña de aplicación
-
-# Función para enviar correo electrónico
-def send_email(recipient_email, qr_image_path, pedido_id):
+# Función para enviar un mensaje de WhatsApp con la imagen del código QR
+def send_whatsapp_message(phone_number, qr_image_path):
     try:
-        msg = MIMEMultipart()
-        msg['From'] = GMAIL_USER
-        msg['To'] = recipient_email
-        msg['Subject'] = f"Tu código QR para el pedido {pedido_id}"
+        # Configurar el driver de Selenium (usando Chrome)
+        options = webdriver.ChromeOptions()
+        options.add_argument('--user-data-dir=/path/to/your/custom/profile')  # Usar un perfil de usuario persistente para WhatsApp Web
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        driver.get('https://web.whatsapp.com')
 
-        # Cuerpo del correo
-        body = MIMEText(f"Hola,\n\nAquí tienes el código QR para tu pedido {pedido_id}. El código QR es válido hasta la expiración indicada.", 'plain')
-        msg.attach(body)
+        # Esperar a que se cargue la página
+        input("Escanea el código QR en WhatsApp Web y presiona Enter para continuar...")
+
+        # Buscar el contacto de WhatsApp y enviar el mensaje
+        search_box = driver.find_element(By.XPATH, '//div[@contenteditable="true"][@data-tab="3"]')
+        search_box.click()
+        search_box.send_keys(phone_number)
+        search_box.send_keys(Keys.RETURN)
+
+        message_box = driver.find_element(By.XPATH, '//div[@contenteditable="true"][@data-tab="1"]')
+        message_box.send_keys("Tu código QR para el pedido ha sido generado. Aquí está el código QR.")
+        message_box.send_keys(Keys.RETURN)
 
         # Adjuntar la imagen del QR
-        with open(qr_image_path, 'rb') as qr_file:
-            qr_image = MIMEImage(qr_file.read())
-            qr_image.add_header('Content-Disposition', 'attachment', filename=os.path.basename(qr_image_path))
-            msg.attach(qr_image)
+        attach_button = driver.find_element(By.XPATH, '//span[@data-icon="clip"]')
+        attach_button.click()
 
-        # Enviar el correo
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()  # Activar cifrado TLS
-            server.login(GMAIL_USER, GMAIL_PASSWORD)
-            server.sendmail(GMAIL_USER, recipient_email, msg.as_string())
+        image_input = driver.find_element(By.XPATH, '//input[@accept="image/*"]')
+        image_input.send_keys(qr_image_path)
 
-        print(f"Correo enviado a {recipient_email} con el código QR.")
+        # Enviar el mensaje con el archivo adjunto
+        send_button = driver.find_element(By.XPATH, '//span[@data-icon="send"]')
+        send_button.click()
+
+        print(f"Mensaje enviado a {phone_number} con el código QR.")
+        driver.quit()
     except Exception as e:
-        print(f"Error al enviar el correo: {e}")
+        print(f"Error al enviar el mensaje de WhatsApp: {e}")
 
 @app.route('/')
 def index():
@@ -54,11 +59,12 @@ def generar_qr():
         data = request.get_json()
 
         # Verificar que los datos necesarios estén presentes
-        if 'pedido_id' not in data or 'expiracion' not in data:
+        if 'pedido_id' not in data or 'expiracion' not in data or 'telefono' not in data:
             return jsonify({'error': 'Faltan parámetros en la solicitud'}), 400
 
         pedido_id = data['pedido_id']
         expiracion = data['expiracion']
+        telefono_cliente = data['telefono']  # Teléfono del cliente para WhatsApp
 
         # Crear el contenido del QR
         qr_content = f"{pedido_id},{expiracion}"
@@ -86,8 +92,8 @@ def generar_qr():
         # Calcular la fecha de expiración en formato UNIX (timestamp)
         expiration_time = time.time() + expiracion
 
-        # Enviar el código QR a tu correo personal (ya configurado)
-        send_email(GMAIL_USER, img_path, pedido_id)  # Enviar a tu correo personal
+        # Enviar el código QR por WhatsApp
+        send_whatsapp_message(telefono_cliente, img_path)
 
         # Devolver la respuesta con el enlace al QR y la expiración
         return jsonify({
