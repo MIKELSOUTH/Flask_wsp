@@ -4,3 +4,4 @@ paho-mqtt
 qrcode
 gunicorn
 Pillow
+selenium
