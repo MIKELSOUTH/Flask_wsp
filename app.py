@@ -3,7 +3,6 @@ import qrcode
 import os
 import time
 from flask_cors import CORS
-import base64
 from io import BytesIO
 
 app = Flask(__name__)
@@ -28,19 +27,17 @@ def generar_qr():
         # Generar QR
         qr_content = f"{pedido_id},{expiracion}"
         qr = qrcode.make(qr_content)
-        buffer = BytesIO()
-        qr.save(buffer)
-        buffer.seek(0)
-        img_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+
+        # Guardar la imagen QR en un objeto BytesIO para enviarla directamente
+        img_io = BytesIO()
+        qr.save(img_io)
+        img_io.seek(0)
 
         # Simular envío de mensaje
         print(f"Simulando envío de WhatsApp a {telefono} con QR")
 
-        return jsonify({
-            'pedido_id': pedido_id,
-            'expiracion': time.time() + expiracion,
-            'qr_base64': img_base64
-        })
+        # Enviar la imagen del QR directamente como un archivo
+        return send_file(img_io, mimetype='image/png', as_attachment=True, download_name=f"{pedido_id}.png")
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
